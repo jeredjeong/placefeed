@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "sed -i 's/export const EventTarget:/export declare const EventTarget:/g' ./node_modules/event-target-shim/index.d.ts"
+    "postinstall": "sed -i 's/export const EventTarget:/export declare const EventTarget:/g' ./node_modules/event-target-shim/index.d.ts && sed -i 's/export const HTTPParser:/export declare const HTTPParser:/g' ./node_modules/http-parser-js/http-parser.d.ts && sed -i 's/export const methods:/export declare const methods:/g' ./node_modules/http-parser-js/http-parser.d.ts"
   },
   "keywords": [],
   "author": "",
