@@ -6,12 +6,9 @@ import 'package:myapp/src/theme/theme_provider.dart';
 import 'package:myapp/src/routing/app_router.dart';
 import 'package:myapp/src/services/auth_service.dart'; // Import AuthService
 import 'package:google_mobile_ads/google_mobile_ads.dart'; // Import Google Mobile Ads
-import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platform_interface.dart';
-import 'package:google_maps_flutter_web/google_maps_flutter_web.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  GoogleMapsFlutterPlatform.instance = GoogleMapsFlutterWeb(); // Register the web implementation
   await MobileAds.instance.initialize(); // Initialize Google Mobile Ads SDK
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
