@@ -20,6 +20,7 @@ void main() async {
 
 /// The route configuration.
 final GoRouter _router = GoRouter(
+  debugLogDiagnostics: true, // Add this line for debugging
   refreshListenable: GoRouterRefreshStream(FirebaseAuth.instance.authStateChanges()),
   redirect: (BuildContext context, GoRouterState state) {
     final bool loggedIn = FirebaseAuth.instance.currentUser != null;
