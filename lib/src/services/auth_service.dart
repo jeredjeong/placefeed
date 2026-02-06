@@ -16,14 +16,20 @@ class AuthService extends ChangeNotifier {
     _auth.authStateChanges().listen((User? firebaseUser) async {
       _user = firebaseUser;
       if (firebaseUser != null) {
-        // Fetch user role from Firestore
-        final userRoleDoc = await _firestore.collection('users').doc(firebaseUser.uid).get();
-        if (userRoleDoc.exists) {
-          _userRole = UserRole.fromFirestore(userRoleDoc, null);
-        } else {
-          // If no role defined, default to 'user' and create the document
-          _userRole = UserRole(uid: firebaseUser.uid, role: 'user');
-          await _firestore.collection('users').doc(firebaseUser.uid).set(_userRole!.toFirestore());
+        try {
+          // Fetch user role from Firestore
+          final userRoleDoc = await _firestore.collection('users').doc(firebaseUser.uid).get();
+          if (userRoleDoc.exists) {
+            _userRole = UserRole.fromFirestore(userRoleDoc, null);
+          } else {
+            // If no role defined, default to 'user' and create the document
+            _userRole = UserRole(uid: firebaseUser.uid, role: 'user');
+            await _firestore.collection('users').doc(firebaseUser.uid).set(_userRole!.toFirestore());
+          }
+        } catch (e, stackTrace) {
+          debugPrint('Error fetching user role: $e');
+          debugPrint('Stack trace: $stackTrace');
+          _userRole = null; // Ensure user role is null on error
         }
       } else {
         _userRole = null;

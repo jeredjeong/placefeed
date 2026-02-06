@@ -5,35 +5,55 @@ import 'package:myapp/src/admin_app/article_form_screen.dart'; // Import Article
 import 'package:myapp/src/auth/login_screen.dart';
 import 'package:myapp/src/user_app/user_home_screen.dart';
 import 'package:myapp/src/services/auth_service.dart'; // Import AuthService
+import 'dart:developer' as developer;
+import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase User
 
 GoRouter buildRouter(AuthService authService) {
   return GoRouter(
     refreshListenable: authService, // Listen to auth state changes
     redirect: (BuildContext context, GoRouterState state) async {
+      developer.log('GoRouter Redirect: state.matchedLocation = ${state.matchedLocation}', name: 'AppRouter');
       final bool loggedIn = authService.user != null;
-      final bool isAdminUser = loggedIn ? await authService.isAdmin(authService.user!) : false;
+      developer.log('GoRouter Redirect: loggedIn = $loggedIn', name: 'AppRouter');
+
+      bool isAdminUser = false;
+      if (loggedIn) {
+        final User? currentUser = authService.user;
+        if (currentUser != null) {
+          try {
+            isAdminUser = await authService.isAdmin(currentUser);
+          } catch (e, s) {
+            developer.log('GoRouter Redirect: Error checking isAdmin: $e', error: e, stackTrace: s, name: 'AppRouter');
+            return '/login'; // Redirect to login on error
+          }
+        } else {
+          developer.log('GoRouter Redirect: loggedIn is true but authService.user is null unexpectedly.', name: 'AppRouter');
+          return '/login'; // Unexpected state, redirect to login
+        }
+      }
+      developer.log('GoRouter Redirect: isAdminUser = $isAdminUser', name: 'AppRouter');
 
       final bool goingToLogin = state.matchedLocation == '/login';
-      final bool goingToAdmin = state.matchedLocation.startsWith('/admin'); // Check if trying to access any admin path
+      final bool goingToAdmin = state.matchedLocation.startsWith('/admin');
 
-      // If not logged in
       if (!loggedIn) {
+        developer.log('GoRouter Redirect: Not logged in. Redirecting to ${goingToLogin ? 'null (login page)' : '/login'}', name: 'AppRouter');
         return goingToLogin ? null : '/login';
       }
 
-      // If logged in
       if (loggedIn) {
-        // If going to login, redirect to home
         if (goingToLogin) {
+          developer.log('GoRouter Redirect: Logged in, going to login. Redirecting to /', name: 'AppRouter');
           return '/';
         }
-        // If trying to access admin path and not an admin, redirect to home
         if (goingToAdmin && !isAdminUser) {
+          developer.log('GoRouter Redirect: Logged in, going to admin but not admin user. Redirecting to /', name: 'AppRouter');
           return '/';
         }
       }
 
-      return null; // No redirect
+      developer.log('GoRouter Redirect: No redirect needed. Current location: ${state.matchedLocation}', name: 'AppRouter');
+      return null;
     },
     routes: <RouteBase>[
       GoRoute(
