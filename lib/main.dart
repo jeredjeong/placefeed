@@ -9,6 +9,7 @@ import 'dart:async';
 import 'firebase_options.dart';
 import 'admin_cms/login_screen.dart';
 import 'admin_cms/admin_dashboard_screen.dart';
+import 'admin_cms/news_article_screen.dart'; // Import NewsArticleScreen
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,16 +26,21 @@ final GoRouter _router = GoRouter(
   redirect: (BuildContext context, GoRouterState state) {
     final bool loggedIn = FirebaseAuth.instance.currentUser != null;
     final bool loggingIn = state.matchedLocation == '/admin';
+    final bool tryingToAccessAdminContent = state.matchedLocation.startsWith('/admin') && state.matchedLocation != '/admin';
 
-    // If the user is not logged in and not on the login page, redirect to login.
-    if (!loggedIn && !loggingIn) {
+    // If the user is not logged in and trying to access any protected admin route, redirect to login.
+    if (!loggedIn && tryingToAccessAdminContent) {
       return '/admin';
+    }
+    // If the user is not logged in and on the login page, allow it.
+    if (!loggedIn && loggingIn) {
+      return null;
     }
     // If the user is logged in and on the login page, redirect to the dashboard.
     if (loggedIn && loggingIn) {
       return '/admin/dashboard';
     }
-    // No redirect needed
+    // No redirect needed for logged in users on admin content or non-admin routes.
     return null;
   },
   routes: <RouteBase>[
@@ -54,6 +60,12 @@ final GoRouter _router = GoRouter(
           path: 'dashboard',
           builder: (BuildContext context, GoRouterState state) {
             return const AdminDashboardScreen();
+          },
+        ),
+        GoRoute(
+          path: 'news',
+          builder: (BuildContext context, GoRouterState state) {
+            return const NewsArticleScreen();
           },
         ),
       ],
