@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart'; // For date formatting
+import 'package:url_launcher/url_launcher.dart'; // Import url_launcher
 import 'package:myapp/admin_cms/admin_layout.dart';
 import 'package:myapp/models/news_article.dart'; // Import the NewsArticle model
 
