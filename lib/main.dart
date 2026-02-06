@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:geolocator/geolocator.dart'; // Import geolocator
-import 'dart:async'; // Import for Completer
+import 'package:geolocator/geolocator.dart';
+import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Import FirebaseAuth
+import 'dart:async';
+
 import 'firebase_options.dart';
+import 'admin_cms/login_screen.dart';
+import 'admin_cms/admin_dashboard_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,17 +18,77 @@ void main() async {
   runApp(const MyApp());
 }
 
+/// The route configuration.
+final GoRouter _router = GoRouter(
+  refreshListenable: GoRouterRefreshStream(FirebaseAuth.instance.authStateChanges()),
+  redirect: (BuildContext context, GoRouterState state) {
+    final bool loggedIn = FirebaseAuth.instance.currentUser != null;
+    final bool loggingIn = state.matchedLocation == '/admin';
+
+    // If the user is not logged in and not on the login page, redirect to login.
+    if (!loggedIn && !loggingIn) {
+      return '/admin';
+    }
+    // If the user is logged in and on the login page, redirect to the dashboard.
+    if (loggedIn && loggingIn) {
+      return '/admin/dashboard';
+    }
+    // No redirect needed
+    return null;
+  },
+  routes: <RouteBase>[
+    GoRoute(
+      path: '/',
+      builder: (BuildContext context, GoRouterState state) {
+        return const MapScreen();
+      },
+    ),
+    GoRoute(
+      path: '/admin',
+      builder: (BuildContext context, GoRouterState state) {
+        return const LoginScreen();
+      },
+      routes: <RouteBase>[
+        GoRoute(
+          path: 'dashboard',
+          builder: (BuildContext context, GoRouterState state) {
+            return const AdminDashboardScreen();
+          },
+        ),
+      ],
+    ),
+  ],
+);
+
+// Custom [ChangeNotifier] to listen for Firebase Auth state changes
+class GoRouterRefreshStream extends ChangeNotifier {
+  GoRouterRefreshStream(Stream<dynamic> stream) {
+    notifyListeners();
+    _subscription = stream.asBroadcastStream().listen(
+          (dynamic _) => notifyListeners(),
+        );
+  }
+
+  late final StreamSubscription<dynamic> _subscription;
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'Placefeed',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const MapScreen(),
+      routerConfig: _router,
     );
   }
 }
@@ -43,27 +108,22 @@ class _MapScreenState extends State<MapScreen> {
   );
 
   Future<void> _goToMyCurrentLocation() async {
-    // Check and request location permissions
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        // Permissions are denied, do nothing or show a message to the user
         return Future.error('Location permissions are denied');
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      // Permissions are denied forever, handle appropriately.
       return Future.error(
           'Location permissions are permanently denied, we cannot request permissions.');
     }
 
-    // Get the current position
     Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high);
 
-    // Animate the camera to the current position
     _controller?.animateCamera(CameraUpdate.newCameraPosition(
       CameraPosition(
         target: LatLng(position.latitude, position.longitude),
@@ -77,7 +137,7 @@ class _MapScreenState extends State<MapScreen> {
     return Scaffold(
       body: GoogleMap(
         myLocationEnabled: true,
-        myLocationButtonEnabled: false, // We'll use a custom button
+        myLocationButtonEnabled: false,
         initialCameraPosition: _kGooglePlex,
         onMapCreated: (GoogleMapController controller) {
           _controller = controller;
