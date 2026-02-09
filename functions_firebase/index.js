@@ -1,181 +1,111 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const axios = require("axios");
-const cheerio = require("cheerio");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 admin.initializeApp();
+const db = admin.firestore();
 
-exports.crawlArticle = functions.https.onCall(async (data, context) => {
-  // Check if the user is authenticated
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "The function must be called while authenticated."
-    );
-  }
+// Gemini API 키와 News API 키는 Firebase 환경 변수에 설정해야 합니다.
+// firebase functions:config:set gemini.key="YOUR_GEMINI_API_KEY"
+// firebase functions:config:set newsapi.key="YOUR_NEWS_API_KEY"
+const geminiApiKey = functions.config().gemini.key;
+const newsApiKey = functions.config().newsapi.key;
 
-  // Check if the user is an admin (optional, but good practice for CMS functions)
-  // This would typically involve checking a custom claim or a Firestore document.
-  // For now, let's allow any authenticated user to crawl.
-  // In a real-world scenario, you'd add:
-  // const userDoc = await admin.firestore().collection('users').doc(context.auth.uid).get();
-  // if (userDoc.data().role !== 'admin') {
-  //   throw new functions.https.HttpsError(
-  //     "permission-denied",
-  //     "User is not authorized to perform this action."
-  //   );
-  // }
+const genAI = new GoogleGenerativeAI(geminiApiKey);
 
-  const articleUrl = data.url;
+// 매 1시간마다 이 함수를 실행합니다. (테스트 시에는 직접 호출하거나 스케줄을 짧게 변경)
+exports.fetchNewsAndAnalyze = functions.pubsub.schedule("every 1 hours").onRun(async (context) => {
+    console.log("뉴스 기사 수집 및 분석을 시작합니다.");
 
-  if (!articleUrl) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "The function must be called with a 'url' argument."
-    );
-  }
-
-  try {
-    const response = await axios.get(articleUrl);
-    const $ = cheerio.load(response.data);
-
-    const title =
-      $('meta[property="og:title"]').attr("content") ||
-      $("title").text() ||
-      "";
-    const description =
-      $('meta[property="og:description"]').attr("content") ||
-      $('meta[name="description"]').attr("content") ||
-      "";
-    const imageUrl =
-      $('meta[property="og:image"]').attr("content") ||
-      $('link[rel="icon"]').attr("href") ||
-      ""; // Fallback to favicon
-
-    return {
-      title,
-      description,
-      imageUrl,
-      url: articleUrl,
-      source: new URL(articleUrl).hostname,
-    };
-  } catch (error) {
-    console.error("Crawling failed for URL:", articleUrl, error);
-    throw new functions.https.HttpsError(
-      "internal",
-      `Failed to crawl article: ${error.message}`
-    );
-  }
-});
-
-exports.scheduledNewsFetcher = functions.pubsub
-  .schedule("every 1 hours")
-  .onRun(async (context) => {
-    const NEWS_API_KEY = functions.config().news.key;
-    const NEWS_API_URL =
-      functions.config().news.url || "https://newsapi.org/v2/top-headlines"; // Example News API
-
-    const GEOCODING_API_KEY = functions.config().geocode.key;
-    const GEOCODING_API_URL =
-      functions.config().geocode.url ||
-      "https://maps.googleapis.com/maps/api/geocode/json"; // Example Google Geocoding API
-
-    if (!NEWS_API_KEY) {
-      console.error("NEWS_API_KEY is not configured.");
-      return null;
+    if (!newsApiKey) {
+        console.error("News API 키가 설정되지 않았습니다. `firebase functions:config:set newsapi.key=\"YOUR_KEY\"` 명령어로 설정해주세요.");
+        return null;
+    }
+     if (!geminiApiKey) {
+        console.error("Gemini API 키가 설정되지 않았습니다. `firebase functions:config:set gemini.key=\"YOUR_KEY\"` 명령어로 설정해주세요.");
+        return null;
     }
 
     try {
-      // 1. Fetch news from an external API
-      const newsResponse = await axios.get(NEWS_API_URL, {
-        params: {
-          apiKey: NEWS_API_KEY,
-          // Example: Fetch top headlines from US
-          country: "us",
-          pageSize: 10, // Limit for demonstration
-        },
-      });
+        // 1. 뉴스 API에서 대한민국 주요 기사 목록 가져오기
+        const response = await axios.get(`https://newsapi.org/v2/top-headlines?country=kr&apiKey=${newsApiKey}`);
+        const articles = response.data.articles;
 
-      const articles = newsResponse.data.articles;
-      const firestore = admin.firestore();
-
-      for (const articleData of articles) {
-        // Simple duplicate check using article URL as ID
-        const existingArticle = await firestore
-          .collection("articles")
-          .where("url", "==", articleData.url)
-          .limit(1)
-          .get();
-
-        if (existingArticle.empty) {
-          let location = new admin.firestore.GeoPoint(0, 0); // Default to (0,0)
-          let source = articleData.source.name || "NewsAPI";
-
-          // 2. Geocode the location (placeholder for actual implementation)
-          // In a real app, you'd extract a location from articleData (e.g., city, country)
-          // and call a geocoding service like Google Geocoding API.
-          // Example: if (articleData.title.includes("Seoul")) {
-          //   // Call GEOCODING_API_URL with GEOCODING_API_KEY
-          //   // location = new admin.firestore.GeoPoint(lat, lng);
-          // }
-
-          // For demonstration, let's assign a random location or a few fixed ones
-          const randomLat = Math.random() * 180 - 90;
-          const randomLng = Math.random() * 360 - 180;
-          location = new admin.firestore.GeoPoint(randomLat, randomLng);
-
-          // 3. Assign default importance and zoom levels
-          const importance = Math.floor(Math.random() * 100) + 1; // 1-100
-          const minZoom = Math.floor(Math.random() * 5) + 1; // 1-5
-          const maxZoom = Math.floor(Math.random() * (20 - minZoom)) + minZoom; // minZoom-20
-
-          // 4. Save to Firestore
-          const newArticleRef = firestore.collection("articles").doc(); // Let Firestore generate ID
-          await newArticleRef.set({
-            title: articleData.title,
-            description: articleData.description,
-            url: articleData.url,
-            imageUrl: articleData.urlToImage,
-            location: location,
-            importance: importance,
-            minZoom: minZoom,
-            maxZoom: maxZoom,
-            publishedAt: new Date(articleData.publishedAt),
-            source: source,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          console.log(`Saved new article: ${articleData.title}`);
-        } else {
-          console.log(`Article already exists: ${articleData.title}`);
+        if (!articles || articles.length === 0) {
+            console.log("새로운 기사를 찾지 못했습니다.");
+            return null;
         }
-      }
-      console.log("Scheduled news fetch completed.");
-      return null;
+
+        console.log(`${articles.length}개의 기사를 찾았습니다. 분석을 시작합니다.`);
+
+        // 2 & 3. 각 기사에 대해 Gemini AI 분석 및 Firestore 저장 실행
+        for (const article of articles) {
+            // Firestore에 이미 저장된 기사인지 URL을 통해 확인
+            const existingArticleSnap = await db.collection("news_articles").where("url", "==", article.url).limit(1).get();
+            if (!existingArticleSnap.empty) {
+                console.log(`이미 처리된 기사입니다: ${article.title}`);
+                continue;
+            }
+        
+            try {
+                const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+
+                const prompt = `
+                    당신은 뉴스 기사 분석 전문가입니다. 다음 기사를 읽고 아래 두 가지 정보를 추출해주세요:
+                    1. "location": 기사의 핵심 사건이 발생한 장소. 이 텍스트는 Google Geocoding API에서 바로 사용할 수 있는 형태여야 합니다. (예: "서울시청", "광화문", "독도") 만약 특정 장소를 식별할 수 없다면 "전국" 또는 "온라인"으로 지정해주세요.
+                    2. "importance": 기사의 중요도를 1부터 10까지의 정수 숫자로 평가해주세요. (10이 가장 중요함)
+
+                    결과는 반드시 다음 JSON 형식으로만 응답해주세요:
+                    {
+                      "location": "추출된 위치 텍스트",
+                      "importance": 중요도_점수
+                    }
+
+                    --- 기사 내용 ---
+                    제목: ${article.title}
+                    내용: ${article.description || ""}
+                    --------------------
+                `;
+
+                const result = await model.generateContent(prompt);
+                const aiResponseText = await result.response.text();
+                
+                // AI 응답이 마크다운 코드 블록을 포함할 수 있으므로 순수 JSON만 추출
+                const jsonMatch = aiResponseText.match(/\{[^]*\}/);
+                if (!jsonMatch) {
+                    throw new Error("AI 응답에서 JSON 형식을 찾을 수 없습니다.");
+                }
+                const analysisResult = JSON.parse(jsonMatch[0]);
+                const { location, importance } = analysisResult;
+
+                // 4. Firestore에 저장하기
+                const newsArticleData = {
+                    title: article.title || "",
+                    author: article.author || "",
+                    source: article.source.name || "",
+                    url: article.url || "",
+                    imageUrl: article.urlToImage || "",
+                    publishedAt: admin.firestore.Timestamp.fromDate(new Date(article.publishedAt)),
+                    content: article.content || article.description || "",
+                    locationText: location,
+                    importance: importance,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                };
+
+                await db.collection("news_articles").add(newsArticleData);
+                console.log(`분석 완료 및 저장: '${article.title}'`);
+
+            } catch (error) {
+                console.error(`'${article.title}' 기사 처리 중 오류 발생:`, error);
+                continue; 
+            }
+        }
+        console.log("모든 기사 처리를 완료했습니다.");
+        return null;
+
     } catch (error) {
-      console.error("Error in scheduled news fetch:", error);
-      throw new functions.https.HttpsError(
-        "internal",
-        `Scheduled news fetch failed: ${error.message}`
-      );
+        console.error("뉴스 기사 수집 중 전역 오류 발생:", error);
+        return null;
     }
-  });
-
-/*
-  REMINDER TO USER:
-
-  To configure environment variables for Cloud Functions, use the Firebase CLI:
-
-  firebase functions:config:set \
-    news.key="YOUR_NEWS_API_KEY" \
-    news.url="YOUR_NEWS_API_BASE_URL" \
-    geocode.key="YOUR_GOOGLE_GEOCODING_API_KEY" \
-    geocode.url="YOUR_GOOGLE_GEOCODING_API_BASE_URL"
-
-  Then deploy functions: `firebase deploy --only functions`
-
-  Example for NewsAPI.org:
-  firebase functions:config:set news.key="YOUR_NEWS_API_KEY" news.url="https://newsapi.org/v2/top-headlines"
-
-  Example for Google Geocoding API:
-  firebase functions:config:set geocode.key="YOUR_GEOCODING_API_KEY" geocode.url="https://maps.googleapis.com/maps/api/geocode/json"
-*/
+});
